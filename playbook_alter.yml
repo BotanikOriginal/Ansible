@@ -1,0 +1,115 @@
+---
+- hosts: app
+  become: yes
+  tasks:
+    - name: Установка Docker на Ubuntu
+      apt:
+        name: docker.io
+        state: present
+      when: ansible_os_family == 'Debian'
+
+    - name: Установка необходимых пакетов
+      dnf:
+        name:
+          - dnf-utils
+          - device-mapper-persistent-data
+          - lvm2
+        state: present
+      when: ansible_os_family == 'RedHat'
+
+    - name: Добавление репозитория Docker
+      command: dnf config-manager --add-repo=https://download.docker.com/linux/centos/docker-ce.repo
+      args:
+        warn: false
+      when: ansible_os_family == 'RedHat'
+
+    - name: Обновление списка пакетов
+      dnf:
+        update_cache: yes
+      when: ansible_os_family == 'RedHat'
+
+    - name: Установка Docker CE
+      dnf:
+        name: docker-ce
+        state: present
+      when: ansible_os_family == 'RedHat'
+
+    - name: Запуск Docker
+      service:
+        name: docker
+        state: started
+      when: ansible_os_family == 'Debian'
+
+    - name: Запуск и включение службы Docker
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+      when: ansible_os_family == 'RedHat'
+
+- hosts: database
+  become: yes
+  tasks:
+    - name: Обновление списка пакетов
+      apt:
+        update_cache: yes
+
+    - name: Установка PostgreSQL и дополнительных пакетов
+      apt:
+        name:
+          - postgresql-{{ pg_version }}
+          - postgresql-contrib
+        state: present
+
+    - name: Получение текущего расположения директории данных
+      command: sudo -u postgres psql -c 'SHOW data_directory;'
+      register: data_directory_output
+
+    - name: Остановка службы PostgreSQL
+      systemd:
+        name: postgresql
+        state: stopped
+
+    - name: Создание новой директории для данных
+      file:
+        path: "{{ new_data_directory }}"
+        state: directory
+        owner: postgres
+        group: postgres
+        mode: '0750'
+
+    - name: Копирование данных в новую директорию
+      command: rsync -av {{ old_data_directory }}/ {{ new_data_directory }}/
+
+    - name: Переименование старой директории с данными
+      command: mv {{ old_data_directory }} {{ old_data_directory }}.bkp
+      ignore_errors: yes
+
+    - name: Изменение конфигурации PostgreSQL для указания новой директории
+      lineinfile:
+        path: "/etc/postgresql/{{ pg_version }}/main/postgresql.conf"
+        regexp: '^data_directory'
+        line: "data_directory = '{{ new_data_directory }}'"
+        state: present
+
+    - name: Запуск службы PostgreSQL
+      systemd:
+        name: postgresql
+        state: started
+
+    - name: Проверка статуса службы PostgreSQL
+      systemd:
+        name: postgresql
+        state: started
+      register: pg_status
+
+    - debug:
+        var: pg_status
+
+    - name: Подключение к серверу PostgreSQL для проверки баз данных
+      command: sudo -u postgres psql -c '\l'
+      register: db_list
+
+    - debug:
+        var: db_list.stdout_lines
+
