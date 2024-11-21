@@ -1,0 +1,30 @@
+---
+- name: Install PHP-FPM
+  apt:
+    name: php-fpm
+    state: latest
+
+- name: Configure PHP-FPM to listen on port 9000
+  lineinfile:
+    path: /etc/php/7.4/fpm/pool.d/www.conf
+    regexp: '^listen ='
+    line: 'listen = 127.0.0.1:9000'
+
+- name: Start PHP-FPM service
+  service:
+    name: php7.4-fpm
+    state: restarted
+    enabled: yes
+
+- name: Create dir for index.php
+  ansible.builtin.file:
+    path: /var/www/html
+    state: directory
+    mode: '0755'
+    recurse: yes
+
+- name: Create index.php
+  template:
+    src: index.php.j2
+    dest: /var/www/html/index.php
+ 
